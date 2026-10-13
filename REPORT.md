@@ -138,10 +138,23 @@ Ngoài ra: test `in_range`/`max_gap_ms` vẫn dùng được nhưng cần chạy
 
 Câu SQL bạn thêm vào dashboard và điều nó cho biết:
 
-(trả lời ở đây)
+**"Tỷ lệ khung bị loại theo từng trip, so với tốc độ trung bình"**
+
+```sql
+select trip_id, drive_id, split, round(avg_speed_kmh::numeric, 1) as toc_do_tb_kmh, frames, frames_kept,
+       round(100.0 * (frames - frames_kept) / frames, 1) as ty_le_loai_pct
+from marts.mart_trip_summary
+order by ty_le_loai_pct desc;
+```
+
+Kết quả: tỷ lệ loại dao động từ 0% (4 trip, toàn drive_b trừ trip-07304) đến **56,7% ở `trip-04622`** (drive_a, 34/60 khung bị loại). 5 trip loại nhiều nhất đều thuộc **drive_a**. Gom theo tốc độ: trip < 30 km/h loại **29,3%**, 30–60 km/h **17,9%**, > 60 km/h **14,0%** — xe chậm thì khung gần trùng nhiều, khớp với Câu 5. Nhưng `trip-04622` chạy 67 km/h mà vẫn loại hơn một nửa, nên nguyên nhân không phải tốc độ mà là sự cố camera (đoạn đứng hình 6 s/khung đen/mờ của drive_a) — đây là trip cần mở ảnh trong MinIO để kiểm tra trước khi tin dữ liệu của nó. Câu hỏi này giúp phát hiện trip "có vấn đề" mà tổng số khung của cả dataset che mất. Lưu ý thêm: cả 4 trip test của mình (`trip-07774` 38,2% … `trip-01037` 0%) có tỷ lệ loại rất khác nhau, nên tập test nhỏ (154 khung) có thể không đại diện.
 
 ## Nhìn lại
 
 Điều bạn thấy bất ngờ nhất, điều gì còn chưa rõ, và một lỗi dữ liệu mà bạn nghĩ pipeline **chưa** bắt được (nếu có). Tối đa 8 dòng.
 
-(trả lời ở đây)
+- **Bất ngờ nhất:** chỉ đổi thứ tự trip bằng MSSV mà `dataset_version` khác hẳn, trong khi bấm Clear hai lần cho cùng một trip vẫn giữ nguyên `ecfe1509494e` — phiên bản theo nội dung chứ không theo lần chạy.
+- **Bất ngờ thứ hai:** ngưỡng dHash đổi từ 2 lên 6 làm số khung "trùng" của drive A tăng từ 149 lên 363 (60% dataset) — một con số cấu hình nhỏ quyết định phần lớn dữ liệu.
+- **Còn chưa rõ:** chọn ngưỡng 40 cho khung "tối" và 150 ms cho đồng bộ dựa trên căn cứ nào; nên hiệu chỉnh theo từng camera chứ không dùng một số chung.
+- **Lỗi pipeline chưa bắt:** `in_range` chỉ chặn tốc độ ngoài 0..70 m/s; một giá trị sai nhưng vẫn "hợp lệ" (ví dụ nhảy 10 → 60 m/s trong 0,1 s, gia tốc vô lý) hoặc GPS nhảy vị trí vẫn lọt vào silver. Ngoài ra `telemetry_clock_offset_ms` là số khai báo tay — nếu khai sai (lệch 1,5 s thành 0), mọi check vẫn có thể PASS trừ check riêng cho drive B; pipeline nên tự ước lượng độ lệch (ví dụ so tốc độ với chuyển động quang học của video).
+- **Thực tế Windows:** Git tự đổi file `.sh` sang CRLF và làm hỏng script trong container; phải thêm `.gitattributes` (`eol=lf`).

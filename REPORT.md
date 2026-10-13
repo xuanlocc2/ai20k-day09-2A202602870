@@ -111,6 +111,8 @@ Hai lần chạy liên tiếp của mình: `step 4` rồi `cli export-dataset` �
 
 Trả lời "dataset này được tạo từ đâu": từ hai video có đúng hai sha256 trên, qua `silver.frames` **phiên bản 27** (26 commit đầu = 26 trip, +2 commit từ thí nghiệm idempotency chạy lại trip-00003), `silver.telemetry` v0 và các bảng bronze v0/v1, bỏ khung đen/mờ/gần trùng/mất đồng bộ, chia theo trip. 3 tháng sau, để tái tạo: dùng Delta **time travel** đọc đúng các phiên bản bảng ghi trong `lineage`, kiểm tra video gốc còn khớp sha256, chạy lại với cùng `rules`, cùng code (commit Git) và cùng MSSV `2A202602870` (muối chia split); kết quả phải ra lại `dataset_version = ecfe1509494e` và `manifest_sha256` như trên — nếu khác là biết ngay có gì đã đổi.
 
+Đối chiếu: sau lượt chạy cuối `step all --reset` (không có thí nghiệm chạy lại), `lineage` ghi `silver.frames: 25` (26 commit = 26 trip) thay vì 27, nhưng `dataset_version` vẫn `ecfe1509494e` và `manifest_sha256` vẫn `19efb905…290e`. Tức là lineage ghi **lịch sử bảng đã tạo ra** dataset (khác nhau giữa hai lần chạy), còn version/manifest_sha256 đo **nội dung** dataset (giống nhau) — cần cả hai để vừa tái tạo vừa kiểm chứng.
+
 ## Bước 5 · Điều phối và phục vụ
 
 ### Câu 9

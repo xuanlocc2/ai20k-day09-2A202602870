@@ -11,8 +11,8 @@
 
 ## Kết quả cuối
 
-- `dataset_version` của bạn: `<điền>`  (phải khớp `report/evidence/run_summary.json`)
-- Số khung hình train / val / test của bạn: `<điền>`
+- `dataset_version` của bạn: `ecfe1509494e`  (phải khớp `report/evidence/run_summary.json`)
+- Số khung hình train / val / test của bạn: `679 / 186 / 154` (tổng 1019; trip 18 / 4 / 4)
 - `report/verify.txt`: tạo bằng `python3 scripts/check_submission.py --save-verify` (phải có `27/27 checks passed`).
 - Ảnh chụp trong `report/screenshots/`: `airflow_graph.png`, `minio_lake.png`, `metabase_dashboard.png`, và ảnh bài tập sập/chạy lại (log task đỏ thấy trip của bạn).
 
@@ -82,17 +82,34 @@ Ngưỡng 0 chỉ bắt khung giống hệt bit (A 61, B 8) — bỏ sót camera
 ### Câu 6
 Dựa vào `leakage.json`: chia theo khung hình làm bao nhiêu trip bị chia cắt, so với chia theo trip? Vì sao điều này làm điểm kiểm thử đẹp một cách giả tạo?
 
-(trả lời ở đây)
+`leakage.json`: với 1019 khung đáng dùng thuộc 26 trip, chia **theo khung hình** ngẫu nhiên 70/15/15 làm **26/26 trip** nằm ở nhiều hơn một split, và cả **26 trip** có khung ở cả train lẫn test. Chia **theo trip** (gold của pipeline) thì **0 trip** bị chia cắt; bước 4 cho thấy mỗi drive vẫn có đủ train/val/test (A 9/2/2 trip, B 9/2/2 trip).
+
+Lấy mẫu 2 khung/giây nên hai khung liền nhau của cùng một trip gần như giống hệt (cùng đoạn đường, cùng ánh sáng, cùng xe phía trước). Khi chia theo khung, gần như mọi khung test đều có "anh em sinh đôi" trong train: mô hình chỉ cần nhớ chứ không cần tổng quát hoá, nên điểm test cao giả tạo — nó đo khả năng nhận lại cảnh đã thấy, không phải khả năng chạy trên đoạn đường mới. Khi triển khai trên trip mới, điểm sẽ tụt và ta không biết trước.
 
 ### Câu 7
 Vì sao `dataset_version` là **băm nội dung** chứ không phải ngày giờ hay số đếm? Hai lần chạy liên tiếp cho kết quả gì? Vì sao `dataset_version` của bạn **khác** bạn bè dù cùng dữ liệu (liên hệ MSSV)?
 
-(trả lời ở đây)
+`pipeline/publish.py` tính `dataset_version = sha256("frame_id|split" của mọi khung, theo thứ tự)[:12]`. Vì là băm **nội dung**, cùng tập khung và cùng cách chia luôn cho cùng phiên bản; chỉ cần một khung thêm/bớt hoặc một trip đổi split là phiên bản đổi. Ngày giờ hay số đếm sẽ đổi mỗi lần chạy dù dữ liệu y hệt (không biết hai dataset có giống nhau không, chạy lại thì tạo "phiên bản mới" giả), và hai người chạy cùng lúc có thể ra cùng số đếm cho hai dataset khác nhau.
+
+Hai lần chạy liên tiếp của mình: `step 4` rồi `cli export-dataset` đều ra **`ecfe1509494e`** (1019 khung, 679/186/154), giống cả lượt chạy thử ban đầu `step all --reset` → ổn định. Phiên bản của mình khác bạn bè dù cùng video/telemetry vì `gold_dataset_frames.sql` xếp trip theo `md5(trip_id || LAB_STUDENT_ID)`: MSSV `2A202602870` làm muối nên thứ tự trip, và do đó trip nào vào train/val/test, khác với MSSV khác → cặp `frame_id|split` khác → băm khác.
 
 ### Câu 8
 Đọc phần `lineage` trong `manifest.json` của dataset bạn. Trả lời "dataset này được tạo từ dữ liệu nào?" bằng chính nội dung đó. Nếu một người hỏi 3 tháng sau, thông tin nào giúp tái tạo lại đúng dataset này?
 
-(trả lời ở đây)
+`lake/gold/datasets/ecfe1509494e/manifest.json` (cạnh `train/`, `val/`, `test/`, `manifest.parquet`) có:
+
+```json
+"lineage": {
+  "bronze.raw_telemetry_a": 0, "bronze.raw_telemetry_b": 0, "bronze.trips_raw": 0, "bronze.video_files": 1,
+  "silver.frames": 27, "silver.telemetry": 0, "silver.frames_flagged": 0, "silver.frame_telemetry": 0,
+  "input_video_sha256": {
+    "drive_a": "636ba1a98dfc5ba665d1c935e1d2064e69f4df360ff9ffbd15795957d5e7e9aa",
+    "drive_b": "bfa62703f645ff77a8578ae3fc74a00881140d38a404d43c8e2af265bbee9fdc" } },
+"rules": { "drop": ["is_black", "is_blurry", "is_near_dup", "not sync_ok"], "split": "per trip, stratified by drive, md5 order" },
+"manifest_sha256": "19efb905663c5a3d94ad38ec1a330bf0e1840f47e349e52b8b72e9802d87290e"
+```
+
+Trả lời "dataset này được tạo từ đâu": từ hai video có đúng hai sha256 trên, qua `silver.frames` **phiên bản 27** (26 commit đầu = 26 trip, +2 commit từ thí nghiệm idempotency chạy lại trip-00003), `silver.telemetry` v0 và các bảng bronze v0/v1, bỏ khung đen/mờ/gần trùng/mất đồng bộ, chia theo trip. 3 tháng sau, để tái tạo: dùng Delta **time travel** đọc đúng các phiên bản bảng ghi trong `lineage`, kiểm tra video gốc còn khớp sha256, chạy lại với cùng `rules`, cùng code (commit Git) và cùng MSSV `2A202602870` (muối chia split); kết quả phải ra lại `dataset_version = ecfe1509494e` và `manifest_sha256` như trên — nếu khác là biết ngay có gì đã đổi.
 
 ## Bước 5 · Điều phối và phục vụ
 

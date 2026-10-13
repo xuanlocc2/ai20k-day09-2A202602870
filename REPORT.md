@@ -116,7 +116,13 @@ Trả lời "dataset này được tạo từ đâu": từ hai video có đúng 
 ### Câu 9
 Mô tả chính xác điều xảy ra khi trip của bạn sập rồi chạy lại: bao nhiêu task chuyển đỏ, bao nhiêu task `upstream_failed`, bạn clear gì, dữ liệu có nhân đôi không, `dataset_version` có đổi không? Bằng chứng (ảnh, số) là gì?
 
-(trả lời ở đây)
+Trip của mình: **`trip-04237`** (5 số cuối MSSV `02870` = 2870, 2870 mod 26 = 10 → phần tử thứ 10 của `list-trips`; công thức `int(MSSV) % 26` không dùng được vì MSSV có chữ "A"). Đặt `LAB_FAIL_ONCE=trip-04237`, trigger `day09_reset` rồi `day09_video_pipeline` (run `manual__2026-10-13T08:31:05`):
+- **1 task đỏ**: `silver_frames` map_index 10, log `RuntimeError: simulated crash while extracting trip-04237; run it again` (`fail_task_log.png`). 25 task `silver_frames` còn lại vẫn **success** vì mỗi trip là một task mapped độc lập.
+- **7 task `upstream_failed`**: `dbt_run_silver`, `dbt_test_silver`, `dbt_run_gold`, `dbt_test_gold`, `publish_lake`, `export_dataset`, `publish_warehouse` — quality gate và gold không chạy trên dữ liệu thiếu một trip. Tổng run: 29 success, 1 failed, 7 upstream_failed.
+- **Clear** chỉ task instance `silver_frames[10]` (kèm downstream, không upstream): bronze và 25 trip khác **không** chạy lại. Mình lỡ bấm Clear hai lần nên trip-04237 chạy lại 2 lần (attempt 2 và 3, mỗi lần `{"trip": "trip-04237", "frames": 60}`), sau đó 7 task phía sau chạy tiếp, run chuyển **success** — 37/37 task xanh (`airflow_retry_graph.png`).
+- **Không nhân đôi**: `silver.frames` có 2 commit mới (v25, v26) đều là overwrite 60 dòng của đúng trip đó, nhưng `frame_id unique` vẫn **1246 khung**, trip-04237 vẫn **60 khung**. `scripts/lab.sh verify`: **27/27**, `dataset_version` vẫn **`ecfe1509494e`** — giống hệt lượt chạy không lỗi (`airflow_graph.png`, run `08:18:52`).
+
+Kết luận: nhờ task theo partition + Delta overwrite theo `trip_id`, sửa lỗi chỉ tốn chạy lại 1/26 phần việc nặng, và chạy lại thừa (bấm clear 2 lần) cũng vô hại.
 
 ### Câu 10
 Nâng từ 2 drive lên **500 xe mỗi ngày**: ba thành phần nào của pipeline này sẽ vỡ đầu tiên, và bạn thay bằng gì (nối với slide 12, 22, 23)?

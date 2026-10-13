@@ -60,18 +60,22 @@ Vì sao test `max_gap_ms` là `warn` còn `in_range` là `error`? Kết quả th
 ### Câu 4
 Dựa vào `idempotency.json`: số dòng trước và sau hai lần chạy lại, và khi ghi kiểu `append`. Vì sao Delta `overwrite` theo partition (một trip) an toàn hơn xoá rồi ghi lại, nhất là khi giữa chừng có lỗi?
 
-(trả lời ở đây)
+`idempotency.json` (trip `trip-00003`, 60 khung): trước khi chạy lại `silver.frames` có **1246 dòng**, dấu vân tay `6c7480dfde7e`; sau **2 lần** chạy lại trip đó vẫn **1246 dòng**, vân tay `6c7480dfde7e` (`unchanged: true`). Cách sai ghi `append` hai lần cho một trip: **120 dòng** cho trip chỉ có 60 khung → nhân đôi.
+
+Pipeline ghi bằng Delta `overwrite` với `predicate = "trip_id = 'trip-00003'"` (`pipeline/frames.py`): xoá-dòng-cũ và thêm-dòng-mới của trip nằm trong **cùng một commit** của transaction log. Nếu lỗi giữa chừng (container chết khi đang ghi Parquet), commit không xảy ra, người đọc vẫn thấy phiên bản cũ đầy đủ; chạy lại chỉ cần làm lại đúng trip đó. "Xoá rồi ghi lại" là hai thao tác tách rời: sập sau bước xoá thì trip mất dữ liệu (bảng thiếu 60 khung mà không ai biết), và người đọc giữa hai bước có thể thấy bảng thiếu. Ngoài ra overwrite theo partition chỉ đụng một trip, 25 trip còn lại không bị ghi lại.
 
 ### Câu 5
 Khung hình **đen** và khung hình **tối** khác nhau thế nào, pipeline xử lý khác nhau ra sao, bạn có đồng ý không? Dựa vào `threshold.json`: nếu chọn ngưỡng 0, 2, 6 thì bao nhiêu khung bị coi là trùng ở mỗi drive? Bạn chọn ngưỡng nào, vì sao, và ngưỡng đó phụ thuộc vào tốc độ xe thế nào?
 
 | dHash khác tối đa | số khung trùng, drive A | số khung trùng, drive B |
 |---|---|---|
-| 0 | | |
-| 2 | | |
-| 6 | | |
+| 0 | 61 / 602 | 8 / 644 |
+| 2 | 149 / 602 | 53 / 644 |
+| 6 | 363 / 602 | 244 / 644 |
 
-(trả lời ở đây)
+**Đen** là độ sáng trung bình < 12 (`dark_luma`) — ống kính bị che, lỗi giải mã, không có thông tin ảnh — bị `is_black` và **loại** khỏi gold. **Tối** là 12 ≤ độ sáng < 40 (`dark_soft`) — đường hầm, bóng râm, chiều tối — chỉ gắn `is_dark` và **giữ lại**. Ở bước 3: drive A có 6 khung đen, 4 khung tối; drive B có 4 khung đen nhưng **61 khung tối được giữ**. Mình đồng ý: mô hình chạy ngoài đường thật sẽ gặp đường hầm, bỏ các khung tối sẽ làm dataset thiên về điều kiện đẹp; cờ `is_dark` vẫn cho phép lọc/cân bằng sau nếu cần. (Khung mờ cũng chỉ tính khi độ sáng ≥ 12, để một khung đen không bị đếm hai lần.)
+
+Ngưỡng 0 chỉ bắt khung giống hệt bit (A 61, B 8) — bỏ sót camera đứng hình có nhiễu nén nhẹ; ngưỡng 6 coi 363/602 khung A (60%) là trùng, chắc chắn loại cả khung khác nhau thật khi xe chạy chậm. Mình chọn giữ **ngưỡng 2**: A 149 khung trùng, bắt được 11/12 khung của đoạn camera đứng hình 6 giây ở A (check PASS), trong khi B chỉ 53. Ngưỡng phụ thuộc tốc độ: lấy mẫu 2 khung/giây, xe đứng yên hoặc chạy chậm (A, tối đa 71 km/h, nhiều đoạn dừng) thì hai khung liên tiếp gần như giống nhau → nhiều khung "trùng"; xe nhanh (B, tối đa 100 km/h) thì cảnh đổi nhiều giữa hai khung → ít trùng. Cải tiến: ngưỡng thay đổi theo `speed_mps` (xe dừng: ngưỡng cao; xe chạy nhanh: ngưỡng thấp), hoặc lấy mẫu theo quãng đường thay vì theo thời gian.
 
 ## Bước 4 · Gold
 

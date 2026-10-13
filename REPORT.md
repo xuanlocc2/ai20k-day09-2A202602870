@@ -7,7 +7,7 @@
 | Họ và tên | `Nguyễn Văn Xuân Lộc` |
 | MSSV (đúng bằng `LAB_STUDENT_ID` trong `.env`) | `2A202602870` |
 | GitHub | `xuanlocc2` |
-| Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `trip-00003` |
+| Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `trip-04237` |
 
 ## Kết quả cuối
 

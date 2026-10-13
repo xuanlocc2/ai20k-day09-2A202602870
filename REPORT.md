@@ -7,7 +7,7 @@
 | Họ và tên | `Nguyễn Văn Xuân Lộc` |
 | MSSV (đúng bằng `LAB_STUDENT_ID` trong `.env`) | `2A202602870` |
 | GitHub | `xuanlocc2` |
-| Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `<điền: trip-xxxxx>` |
+| Trip dùng cho bài tập sập và chạy lại (xem GUIDE, bước 5) | `trip-00003` |
 
 ## Kết quả cuối
 
@@ -121,7 +121,12 @@ Mô tả chính xác điều xảy ra khi trip của bạn sập rồi chạy l�
 ### Câu 10
 Nâng từ 2 drive lên **500 xe mỗi ngày**: ba thành phần nào của pipeline này sẽ vỡ đầu tiên, và bạn thay bằng gì (nối với slide 12, 22, 23)?
 
-(trả lời ở đây)
+Hiện tại: 2 drive ≈ 10 phút video → 26 trip, 1246 khung, DAG ≈ 2–3 phút. 500 xe/ngày (giả sử mỗi xe vài giờ video) là gấp hàng nghìn lần:
+1. **Trích khung hình (`silver_frames`)** vỡ đầu tiên: decode video + tính độ sáng/blur/dHash bằng CPU trong **một** container Airflow, `max_active_tis_per_dagrun=1` (chạy tuần tự từng trip). Thay bằng worker phân tán (KubernetesExecutor/Celery hoặc Spark/Ray), decode bằng GPU, mỗi trip/xe một job song song; Airflow chỉ điều phối chứ không tự làm việc nặng.
+2. **Airflow dynamic mapping một DAG cho mọi trip**: 500 xe × hàng chục trip = hàng chục nghìn task mapped mỗi lần chạy, scheduler và metadata DB sẽ nghẽn; `day09_reset` + chạy lại cả DAG cũng không còn khả thi. Thay bằng DAG phân vùng theo ngày/xe, ingest hướng sự kiện (thông báo S3/Kafka khi xe upload xong), backfill theo partition.
+3. **DuckDB một file + một tiến trình ghi Delta**: `lakehouse.duckdb` nằm trên một máy, dbt chạy full-refresh và test quét toàn bảng; `silver.frames` nhận hàng nghìn commit overwrite nhỏ/ngày → nhiều file nhỏ, xung đột commit, log Delta phình. Thay bằng engine phân tán (Spark/Trino) trên Delta/Iceberg, model dbt `incremental` theo partition ngày/xe, compaction (OPTIMIZE) định kỳ; MinIO một node cũng phải chuyển sang object store nhiều node/S3.
+
+Ngoài ra: test `in_range`/`max_gap_ms` vẫn dùng được nhưng cần chạy theo partition mới, và `mart_frame_gallery` (một dòng/khung trong Postgres) nên chỉ giữ mẫu hoặc tổng hợp thay vì toàn bộ khung.
 
 ## Câu hỏi riêng của bạn trên Metabase
 

@@ -21,7 +21,13 @@
 ### Câu 1
 Liệt kê **ít nhất 4 khác biệt** giữa telemetry nguồn A và nguồn B mà bạn thấy ở bronze. Vì sao pipeline giữ **mỗi nguồn một bảng bronze** và để mọi cột ở dạng chữ, thay vì gộp và ép kiểu ngay?
 
-(trả lời ở đây)
+Từ 2 dòng mẫu đầu của `bronze.raw_telemetry_a` và `bronze.raw_telemetry_b` (bước 1):
+1. **Timestamp:** A dùng `ts_utc` dạng chuỗi ISO-8601 UTC (`2025-10-07T08:00:00.014Z`); B dùng `timestamp_ms` là epoch mili-giây (`1759933801509`). Ngoài ra đồng hồ B lệch video `telemetry_clock_offset_ms = 1500` (A = 0).
+2. **Tốc độ khác đơn vị:** A `speed_mps` (m/s, `1.213`); B `spd_kmh` (km/h, `55.11`).
+3. **Ga/phanh khác thang:** A `gas`/`brake` là tỉ lệ 0–1 (`0.028`); B `throttle_pct`/`brake_pct` là phần trăm 0–100 (`2.0`).
+4. **Tên cột khác nhau cho cùng đại lượng:** `heading_deg`↔`hdg`, `lat`/`lon`↔`latitude`/`longitude`, `alt_m`↔`altitude`, `acc_x`/`acc_y`↔`ax`/`ay`, `steer`↔`steering`.
+
+Mọi cột telemetry ở bronze đều là `VARCHAR`, kể cả giá trị trống (30 dòng `speed` rỗng ở mỗi nguồn). Giữ mỗi nguồn một bảng, dạng chữ, để bronze là bản sao **trung thực, chỉ thêm** của file gốc (đối chiếu được 3021 = 3021, 3234 = 3234 dòng CSV): nếu ép kiểu ngay thì dòng hỏng (ô trống, giá trị lạ) sẽ làm lỗi cả lượt nạp hoặc bị biến thành NULL/xóa im lặng, và nếu gộp ngay thì phải chọn đơn vị/tên cột chung trước khi biết hết khác biệt. Đẩy việc đổi đơn vị, ép kiểu, bỏ lệch đồng hồ và cách ly dòng lỗi sang silver giúp sửa logic rồi chạy lại từ bronze mà không cần nạp lại nguồn. Bằng chứng nạp lặp không nhân đôi: lần nạp thứ hai báo `already present`, `cli history bronze.raw_telemetry_a` chỉ có **1 commit** (version 0, 3021 dòng); `bronze.video_files` có 2 dòng với 2 sha256 khác nhau (mỗi drive 1 commit), video nhận diện bằng SHA256 chứ không phải tên file.
 
 ## Bước 2 · Silver telemetry
 

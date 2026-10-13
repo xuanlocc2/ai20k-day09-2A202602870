@@ -160,3 +160,31 @@ Kết quả: tỷ lệ loại dao động từ 0% (4 trip, toàn drive_b trừ t
 - **Còn chưa rõ:** chọn ngưỡng 40 cho khung "tối" và 150 ms cho đồng bộ dựa trên căn cứ nào; nên hiệu chỉnh theo từng camera chứ không dùng một số chung.
 - **Lỗi pipeline chưa bắt:** `in_range` chỉ chặn tốc độ ngoài 0..70 m/s; một giá trị sai nhưng vẫn "hợp lệ" (ví dụ nhảy 10 → 60 m/s trong 0,1 s, gia tốc vô lý) hoặc GPS nhảy vị trí vẫn lọt vào silver. Ngoài ra `telemetry_clock_offset_ms` là số khai báo tay — nếu khai sai (lệch 1,5 s thành 0), mọi check vẫn có thể PASS trừ check riêng cho drive B; pipeline nên tự ước lượng độ lệch (ví dụ so tốc độ với chuyển động quang học của video).
 - **Thực tế Windows:** Git tự đổi file `.sh` sang CRLF và làm hỏng script trong container; phải thêm `.gitattributes` (`eol=lf`).
+
+## Điểm cộng · Thí nghiệm riêng: độ nhạy của `sync_tol_ms`
+
+**Câu hỏi:** frame chỉ vào gold nếu telemetry gần nhất (ASOF, mẫu ngay trước frame) cách nó ≤ `sync_tol_ms` (mặc định **150 ms**). Ngưỡng này quyết định bao nhiêu dữ liệu, và có nên đổi không?
+
+**Trước (giá trị gốc 150 ms):** mỗi drive 7 khung `mat_dong_bo` (6 khung lệch > 150 ms + 1 khung không có telemetry nào trước nó); gold **1019 khung** (679 / 186 / 154), `ecfe1509494e`.
+
+**Cách làm:** không sửa `dbt/dbt_project.yml`; chạy `scripts/lab.sh dbt run --select silver_frame_telemetry+ --vars '{sync_tol_ms: N}'` rồi `scripts/lab.sh cli export-dataset`. Bằng chứng: `report/evidence/bonus_sync_tol.json`.
+
+Phân bố `sync_gap_ms` trong `silver.frame_telemetry` (số khung lệch hơn mức đó):
+
+| drive | khung | > 50 ms | > 100 ms | > 150 ms | > 300 ms | > 1000 ms | max |
+|---|---|---|---|---|---|---|---|
+| drive_a | 602 | 271 | 136 | 6 | 6 | 4 | 2884 ms |
+| drive_b | 644 | 327 | 186 | 6 | 6 | 5 | 3112 ms |
+
+**Sau:**
+
+| `sync_tol_ms` | khung gold | train / val / test | `dataset_version` |
+|---|---|---|---|
+| 50 | **538** (−47%) | 356 / 104 / 78 | `7bc556969c5f` |
+| 100 | 762 (−25%) | 509 / 142 / 111 | `e8be39a43099` |
+| **150 (gốc)** | **1019** | 679 / 186 / 154 | `ecfe1509494e` |
+| 1000 | 1022 (+3) | 682 / 186 / 154 | `3da17918c9a8` |
+
+**Giải thích:** telemetry ghi khoảng 12–13 Hz (mẫu cách nhau ≈ 77–80 ms, ví dụ `08:00:00.014` → `.091`), nên khi ghép ASOF độ lệch của một frame bình thường rải đều trong 0–80 ms (trung bình 66–73 ms ở bước 3). Ngưỡng **dưới chu kỳ lấy mẫu** (50, 100 ms) loại cả frame hoàn toàn bình thường chỉ vì rơi vào cuối khoảng giữa hai mẫu — mất 25–47% dataset mà không tăng chất lượng. Từ 150 đến 300 ms con số **không đổi**: chỉ còn các frame thật sự rơi vào khoảng mất tín hiệu (khoảng hở 3073 ms ở A, 3124 ms ở B mà `max_gap_ms` đã WARN ở bước 2). Nâng lên 1000 ms chỉ cứu thêm 3 frame, nhưng các frame này mang telemetry cũ tới 1 s: ở 90 km/h là sai vị trí ~25 m và sai tốc độ/góc lái — nhãn sai lọt vào gold. Số trip mỗi split không đổi (18/4/4) vì split theo trip, nhưng `dataset_version` đổi ở mọi lần thử, đúng như Câu 7: version băm nội dung nên đổi ngưỡng là ra dataset khác.
+
+**Kết luận:** 150 ms (≈ 2 chu kỳ telemetry) là điểm hợp lý — nằm ngay trên chu kỳ lấy mẫu, dưới mọi khoảng mất tín hiệu thật. Quy tắc tổng quát: `sync_tol_ms` nên đặt theo tần số telemetry của từng nguồn (≈ 1,5–2 × chu kỳ), không phải một số cố định. **Khôi phục:** chạy lại `scripts/lab.sh step all --reset` với giá trị gốc 150 ms → 27/27, `dataset_version` trở lại `ecfe1509494e` (`run_summary.json`).

@@ -1,0 +1,18 @@
+{
+  "experiment": "bonus_sync_tol_ms",
+  "student_id": "2A202602870",
+  "ran_at": "2026-10-13T09:15:04+00:00",
+  "how": "scripts/lab.sh dbt run --select silver_frame_telemetry+ --vars '{sync_tol_ms: N}' ; scripts/lab.sh cli export-dataset (dbt_project.yml không bị sửa)",
+  "baseline": {"sync_tol_ms": 150, "sync_lost": {"drive_a": 7, "drive_b": 7}, "gold_frames": 1019, "by_split": {"train": 679, "val": 186, "test": 154}, "dataset_version": "ecfe1509494e"},
+  "sync_gap_ms_distribution": {
+    "drive_a": {"frames": 602, "no_telemetry": 1, "gt50": 271, "gt100": 136, "gt150": 6, "gt300": 6, "gt1000": 4, "max": 2884},
+    "drive_b": {"frames": 644, "no_telemetry": 1, "gt50": 327, "gt100": 186, "gt150": 6, "gt300": 6, "gt1000": 5, "max": 3112}
+  },
+  "runs": [
+    {"sync_tol_ms": 50,   "gold_frames": 538,  "by_split": {"train": 356, "val": 104, "test": 78},  "dataset_version": "7bc556969c5f"},
+    {"sync_tol_ms": 100,  "gold_frames": 762,  "by_split": {"train": 509, "val": 142, "test": 111}, "dataset_version": "e8be39a43099"},
+    {"sync_tol_ms": 150,  "gold_frames": 1019, "by_split": {"train": 679, "val": 186, "test": 154}, "dataset_version": "ecfe1509494e"},
+    {"sync_tol_ms": 1000, "gold_frames": 1022, "by_split": {"train": 682, "val": 186, "test": 154}, "dataset_version": "3da17918c9a8"}
+  ],
+  "restored": "sync_tol_ms=150 qua scripts/lab.sh step all --reset; xem run_summary.json"
+}

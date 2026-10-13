@@ -34,12 +34,26 @@ Mọi cột telemetry ở bronze đều là `VARCHAR`, kể cả giá trị tr�
 ### Câu 2
 Pipeline đưa hai nguồn về một schema như thế nào (đơn vị, kiểu thời gian, **độ lệch đồng hồ**)? Bằng chứng nào trong kết quả bước 2 cho thấy đã đúng? Dán bảng quarantine của bạn (số dòng theo từng lý do, từng drive) và giải thích vì sao dòng lỗi vào `rejects` thay vì bị xoá.
 
-(trả lời ở đây)
+Hai model staging đưa cả hai nguồn về cùng schema `ts timestamptz, speed_mps double, heading_deg, lat, lon, ... gas, brake` (ga/phanh 0–1):
+- **A** (`stg_telemetry_a.sql`): chỉ đổi tên/ép kiểu, `cast(ts_utc as timestamptz)`; tốc độ đã là m/s, offset = 0.
+- **B** (`stg_telemetry_b.sql`): `spd_kmh / 3.6` → m/s; `throttle_pct/100`, `brake_pct/100`; thời gian `to_timestamp((timestamp_ms - telemetry_clock_offset_ms) / 1000.0)`, với offset = **1500 ms** lấy từ `bronze.video_files` (manifest lúc ingest), không viết cứng.
+- Ô trống được `try_cast(nullif(speed, '') as double)` thành NULL để sau đó phân loại `speed_missing`.
+
+Bằng chứng: sau chuẩn hoá, mẫu đầu của B là `2025-10-08 14:30:00.009+00` trong khi video B bắt đầu `14:30:00+00` (lệch 9 ms, check "drive B clock offset removed" PASS); nếu không trừ offset thì sẽ lệch 1,5 s. Tốc độ tối đa sau chuẩn hoá: A 71 km/h, B 100 km/h, cả hai hợp lý (< 130 km/h), check "all speeds in 0..70 m/s" PASS.
+
+| drive | duplicate | speed_missing | speed_out_of_range | rejects | sạch | nhận |
+|---|---|---|---|---|---|---|
+| drive_a | 20 | 30 | 3 | 53 | 2968 | 3021 |
+| drive_b | 20 | 30 | 3 | 53 | 3181 | 3234 |
+
+Tổng: `silver.telemetry` 6149 dòng, `silver.telemetry_rejects` 106 dòng; sạch + rejects = nhận (2968+53=3021, 3181+53=3234), không dòng nào biến mất. Dòng lỗi vào `rejects` kèm `reject_reason`, `_batch_id`, `_row_no` (ví dụ drive_a `_row_no=1700` có `speed_mps=250.0`) để đếm, truy ngược đúng dòng trong file nguồn và báo lại cho bên cung cấp. Xoá im lặng thì không chứng minh được số dòng khớp, không phát hiện được nguồn đang xấu dần, và không thể khôi phục nếu luật làm sạch sai.
 
 ### Câu 3
 Vì sao test `max_gap_ms` là `warn` còn `in_range` là `error`? Kết quả thí nghiệm `break-gate` của bạn (`break_gate.json`): test nào bắt được, bao nhiêu dòng, và điều đó cho biết gì về vai trò của "cổng chất lượng"?
 
-(trả lời ở đây)
+`max_gap_ms` (`max_ms: 1000`, `severity: warn` trong `schema.yml`) bắt khoảng hở > 1 s giữa hai mẫu: ở bước 2 nó WARN vì mỗi drive có 1 khoảng hở (A 3073 ms, B 3124 ms). Đây là **cảm biến mất tín hiệu** — dữ liệu còn lại vẫn đúng, frame trong khoảng hở chỉ không ghép được telemetry (sau này bị loại vì mất đồng bộ), nên chỉ cần báo để điều tra chứ không đáng dừng cả pipeline. `in_range` (0..70 m/s) là `error` vì một giá trị ngoài khoảng là **dữ liệu sai** (250 m/s = 900 km/h); nếu lọt vào gold nó làm hỏng nhãn/đặc trưng tốc độ mà mô hình học, nên phải chặn.
+
+`break_gate.json`: khi nới `max_speed_mps` lên 1000, các dòng vô lý lọt khỏi quarantine vào silver; dbt test chuyển từ `PASS=6 WARN=1 ERROR=0` sang `PASS=5 WARN=1 ERROR=1`, test fail là `in_range_silver_telemetry_speed_mps__70__0` với **6 dòng** (đúng 3 dòng `speed_out_of_range` × 2 drive). Khôi phục luật → `PASS=6 WARN=1 ERROR=0`. Nghĩa là cổng chất lượng là lớp phòng thủ **độc lập** với logic làm sạch: khi ai đó sửa nhầm luật làm sạch, test `error` vẫn chặn pipeline trước khi dữ liệu xấu tới gold, còn `warn` chỉ ghi nhận mà không chặn.
 
 ## Bước 3 · Silver frames
 
